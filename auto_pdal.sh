@@ -1,7 +1,6 @@
 #!/bin/bash
 # ---- config ----
 SOURCE_DIR="$1"
-#PIPELINE_JSON="$(dirname "$0")/csf_pipeline.json"
 
 # ---- CHECK INPUT ----
 if [ -z "$SOURCE_DIR" ]; then
@@ -14,26 +13,20 @@ if [ ! -d "$SOURCE_DIR" ]; then
 	exit 1
 fi
 
-#if [ ! -f "$PIPELINE_JSON" ]; then
-#	echo "csf_pipeline.json not found! Make sure it is in the same folder as the Script!"
-#	exit 1
-#fi
-
 if ! command -v pdal &> /dev/null; then
 	echo "pdal is not installed."
 	exit 1
 fi
 
 # ---- COUNT TOTAL FILES ----
-TOTAL=$(find "$SOURCE_DIR" -not -path '*/.*' -type f \( -iname "*.laz" \) | wc -l)
+TOTAL=$(find "$SOURCE_DIR" -not -path '*/.*' -type f \( -iname "*.laz" -o -iname "*.las" \) | wc -l)
 CURRENT=0
 
 echo "Found $TOTAL file(s) to process."
 echo "--------------------------------"
 
 # ---- MAIN LOOP ----
-find "$SOURCE_DIR" -not -path '*/.*' -type f \( -iname "*.laz" \) | while read -r file
-do
+while IFS= read -r file; do
 	CURRENT=$((CURRENT+1))
 
 	#Derive output filename next to input file
@@ -75,7 +68,7 @@ JSON
 
 	if [ $? -eq 0 ]; then
 		echo "[$CURRENT/$TOTAL] Success: $OUTPUT"
-		rm "$file"
+		# rm "$file"  # Original file deletion disabled — remove this comment to re-enable
 	else
 		echo "[$CURRENT/$TOTAL] Failed: $file"
 		echo "Skipping Delete"
@@ -84,7 +77,6 @@ JSON
 	rm -f "$TMP_PIPELINE"
 
 	echo "------------------------------------"
-done
+done < <(find "$SOURCE_DIR" -not -path '*/.*' -type f \( -iname "*.laz" -o -iname "*.las" \))
 
 echo "All files processed!"
-
