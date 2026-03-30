@@ -30,10 +30,12 @@ mkdir -p "$CHUNKS_DIR"
 mkdir -p "$GROUND_DIR"
 
 # ---- STEP 1: SPLIT ----
-echo "Step 1: Splitting $INPUT_FILE into chunks..."
+# length=200 targets ~50M points per tile to keep RAM under ~8GB per CSF run
+# Adjust lower (e.g. 100) if CSF still runs out of memory
+echo "Step 1: Splitting $INPUT_FILE into 200m x 200m chunks..."
 
 TMP_SPLIT=$(mktemp /tmp/pdal_split_XXXXXX.json)
-printf '{\n  "pipeline": [\n    {\n      "type": "readers.las",\n      "filename": "%s"\n    },\n    {\n      "type": "filters.splitter",\n      "length": 500\n    },\n    {\n      "type": "writers.las",\n      "filename": "%s/chunk_#.las"\n    }\n  ]\n}\n' "$INPUT_FILE" "$CHUNKS_DIR" > "$TMP_SPLIT"
+printf '{\n  "pipeline": [\n    {\n      "type": "readers.las",\n      "filename": "%s"\n    },\n    {\n      "type": "filters.splitter",\n      "length": 200\n    },\n    {\n      "type": "writers.las",\n      "filename": "%s/chunk_#.las"\n    }\n  ]\n}\n' "$INPUT_FILE" "$CHUNKS_DIR" > "$TMP_SPLIT"
 
 pdal pipeline "$TMP_SPLIT"
 rm -f "$TMP_SPLIT"
@@ -47,7 +49,7 @@ CHUNK_TOTAL=$(find "$CHUNKS_DIR" -type f -iname "*.las" | wc -l | tr -d ' ')
 echo "Split into $CHUNK_TOTAL chunks."
 echo "------------------------------------"
 
-# ---- STEP 2: CSF ON EACH CHUNK ----
+# ---- STEP 2: CSF ON EACH CHUNK, DELETE CHUNK AFTER TO SAVE DISK ----
 echo "Step 2: Running CSF ground filter on each chunk..."
 CHUNK_CURRENT=0
 
@@ -68,8 +70,11 @@ while IFS= read -r chunk; do
 
     if [ $? -eq 0 ]; then
         echo "[$CHUNK_CURRENT/$CHUNK_TOTAL] Chunk success: $CHUNK_OUTPUT"
+        # Delete processed chunk immediately to free disk space
+        rm -f "$chunk"
     else
         echo "[$CHUNK_CURRENT/$CHUNK_TOTAL] Chunk failed: $chunk"
+        echo "Chunk preserved for inspection."
     fi
 
     rm -f "$TMP_PIPELINE"
@@ -85,12 +90,11 @@ GROUND_FILES=$(find "$GROUND_DIR" -type f -iname "*.las" | tr '\n' ' ')
 
 TMP_MERGE=$(mktemp /tmp/pdal_merge_XXXXXX.json)
 
-# Build readers array dynamically
 READERS=""
 for f in $GROUND_FILES; do
     READERS="$READERS    {\"type\": \"readers.las\", \"filename\": \"$f\"},"
 done
-READERS="${READERS%,}"  # remove trailing comma
+READERS="${READERS%,}"
 
 printf '{\n  "pipeline": [\n%s,\n    {"type": "filters.merge"},\n    {"type": "writers.las", "filename": "%s"}\n  ]\n}\n' "$READERS" "$FINAL_OUTPUT" > "$TMP_MERGE"
 
@@ -99,12 +103,11 @@ rm -f "$TMP_MERGE"
 
 if [ $? -eq 0 ]; then
     echo "Merge successful: $FINAL_OUTPUT"
-    echo "Cleaning up chunks..."
-    rm -rf "$CHUNKS_DIR" "$GROUND_DIR"
+    echo "Cleaning up ground chunks..."
+    rm -rf "$GROUND_DIR"
+    rmdir "$CHUNKS_DIR" 2>/dev/null
 else
-    echo "Merge failed. Chunks preserved in:"
-    echo "  $CHUNKS_DIR"
-    echo "  $GROUND_DIR"
+    echo "Merge failed. Ground chunks preserved in: $GROUND_DIR"
 fi
 
 echo "Done!"
