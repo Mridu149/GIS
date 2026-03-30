@@ -1,5 +1,5 @@
 #!/bin/bash
-# ---- Process large LAZ file by cropping into 3 Y-axis tiles ----
+# ---- Process large LAZ file by cropping into 6 Y-axis tiles ----
 # Bounding box: X 473186.8455-479385.7063, Y 1361077.703-1367579.77
 
 INPUT_FILE="$1"
@@ -26,21 +26,19 @@ FINAL_OUTPUT="$DIR/${STEM}_ground.las"
 
 mkdir -p "$GROUND_DIR"
 
-# Tile bounds (split Y into 3 equal parts, full X extent)
+# Full X extent
 MINX=473186.8455
 MAXX=479385.7063
-MINY1=1361077.703;  MAXY1=1363244.369
-MINY2=1363244.369;  MAXY2=1365411.036
-MINY3=1365411.036;  MAXY3=1367579.770
 
-declare -a MINS_Y=($MINY1 $MINY2 $MINY3)
-declare -a MAXS_Y=($MAXY1 $MAXY2 $MAXY3)
+# 6 equal Y tiles (~1083m each, ~275M points per tile)
+MINS_Y=(1361077.703 1362161.381 1363245.059 1364328.737 1365412.414 1366496.092)
+MAXS_Y=(1362161.381 1363245.059 1364328.737 1365412.414 1366496.092 1367579.770)
 
-TOTAL=3
+TOTAL=6
 echo "Processing $INPUT_FILE in $TOTAL tiles..."
 echo "------------------------------------"
 
-for i in 1 2 3; do
+for i in 1 2 3 4 5 6; do
     IDX=$((i-1))
     MINY=${MINS_Y[$IDX]}
     MAXY=${MAXS_Y[$IDX]}
@@ -67,13 +65,21 @@ done
 # ---- MERGE ----
 echo "Merging tiles into $FINAL_OUTPUT..."
 
-TILE1="$GROUND_DIR/${STEM}_tile1_ground.las"
-TILE2="$GROUND_DIR/${STEM}_tile2_ground.las"
-TILE3="$GROUND_DIR/${STEM}_tile3_ground.las"
-
 TMP_MERGE=$(mktemp /tmp/pdal_merge_XXXXXX.json)
-printf '{\n  "pipeline": [\n    {"type": "readers.las", "filename": "%s"},\n    {"type": "readers.las", "filename": "%s"},\n    {"type": "readers.las", "filename": "%s"},\n    {"type": "filters.merge"},\n    {"type": "writers.las", "filename": "%s"}\n  ]\n}\n' \
-    "$TILE1" "$TILE2" "$TILE3" "$FINAL_OUTPUT" > "$TMP_MERGE"
+
+READERS=""
+for i in 1 2 3 4 5 6; do
+    TILE="$GROUND_DIR/${STEM}_tile${i}_ground.las"
+    if [ -f "$TILE" ]; then
+        READERS="${READERS}    {\"type\": \"readers.las\", \"filename\": \"${TILE}\"},\n"
+    else
+        echo "Warning: Tile $i output not found, skipping from merge: $TILE"
+    fi
+done
+READERS="${READERS%,\\n}"  # remove trailing comma
+
+printf '{\n  "pipeline": [\n%s\n    {"type": "filters.merge"},\n    {"type": "writers.las", "filename": "%s"}\n  ]\n}\n' \
+    "$READERS" "$FINAL_OUTPUT" > "$TMP_MERGE"
 
 pdal pipeline "$TMP_MERGE"
 rm -f "$TMP_MERGE"
