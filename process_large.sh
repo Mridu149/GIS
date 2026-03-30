@@ -23,8 +23,10 @@ DIR=$(dirname "$INPUT_FILE")
 STEM=$(basename "$INPUT_FILE" | sed 's/\.[^.]*$//')
 GROUND_DIR="$DIR/${STEM}_ground_tiles"
 FINAL_OUTPUT="$DIR/${STEM}_ground.las"
+TMPDIR="$DIR/pdal_tmp"
 
 mkdir -p "$GROUND_DIR"
+mkdir -p "$TMPDIR"
 
 # Full X extent
 MINX=473186.8455
@@ -43,10 +45,10 @@ for i in 1 2 3 4 5 6; do
     MINY=${MINS_Y[$IDX]}
     MAXY=${MAXS_Y[$IDX]}
     OUTPUT="$GROUND_DIR/${STEM}_tile${i}_ground.las"
+    TMP_PIPELINE="$TMPDIR/pipeline_tile${i}.json"
 
     echo "[$i/$TOTAL] Tile $i — Y: $MINY to $MAXY"
 
-    TMP_PIPELINE=$(mktemp /tmp/pdal_pipeline_XXXXXX.json)
     printf '{\n  "pipeline": [\n    {\n      "type": "readers.las",\n      "filename": "%s"\n    },\n    {\n      "type": "filters.crop",\n      "bounds": "([%s, %s], [%s, %s])"\n    },\n    {\n      "type": "filters.csf",\n      "resolution": 1.0,\n      "rigidness": 3,\n      "threshold": 0.5,\n      "smooth": false\n    },\n    {\n      "type": "filters.range",\n      "limits": "Classification[2:2]"\n    },\n    {\n      "type": "writers.las",\n      "filename": "%s"\n    }\n  ]\n}\n' \
         "$INPUT_FILE" "$MINX" "$MAXX" "$MINY" "$MAXY" "$OUTPUT" > "$TMP_PIPELINE"
 
@@ -65,7 +67,7 @@ done
 # ---- MERGE ----
 echo "Merging tiles into $FINAL_OUTPUT..."
 
-TMP_MERGE=$(mktemp /tmp/pdal_merge_XXXXXX.json)
+TMP_MERGE="$TMPDIR/merge_pipeline.json"
 
 READERS=""
 for i in 1 2 3 4 5 6; do
@@ -76,7 +78,7 @@ for i in 1 2 3 4 5 6; do
         echo "Warning: Tile $i output not found, skipping from merge: $TILE"
     fi
 done
-READERS="${READERS%,\\n}"  # remove trailing comma
+READERS="${READERS%,\\n}"
 
 printf '{\n  "pipeline": [\n%s\n    {"type": "filters.merge"},\n    {"type": "writers.las", "filename": "%s"}\n  ]\n}\n' \
     "$READERS" "$FINAL_OUTPUT" > "$TMP_MERGE"
@@ -86,10 +88,11 @@ rm -f "$TMP_MERGE"
 
 if [ $? -eq 0 ]; then
     echo "Merge successful: $FINAL_OUTPUT"
-    echo "Cleaning up tiles..."
-    rm -rf "$GROUND_DIR"
+    echo "Cleaning up..."
+    rm -rf "$GROUND_DIR" "$TMPDIR"
 else
     echo "Merge failed. Tiles preserved in: $GROUND_DIR"
+    rm -rf "$TMPDIR"
 fi
 
 echo "Done!"
